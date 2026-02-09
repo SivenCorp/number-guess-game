@@ -288,35 +288,27 @@
 
              console.log('🔄 Нажата кнопка "Создать игру"');
     
-    const btn = document.getElementById('createBtn');
-    btn.disabled = true;
-    btn.textContent = 'Создание...';
+             const btn = document.getElementById('createBtn');
+             btn.disabled = true;
+             btn.textContent = 'Создание...';
+             console.log('📡 Подключаемся к WebSocket...');
     
-    console.log('📡 Подключаемся к WebSocket...');
+             socket = io({
+                 transports: ['websocket', 'polling'],
+                 reconnection: true
+                            });
     
-    socket = io({
-        transports: ['websocket', 'polling'],
-        reconnection: true
-    });
-    
-    socket.on('connect', () => {
-        console.log('✅ Подключено! ID:', socket.id);
-        myId = socket.id;
-        console.log('📤 Отправляем запрос на создание игры...');
-        socket.emit('create_game');
-    });
+            socket.on('connect', () => {
+                console.log('✅ Подключено! ID:', socket.id);
+                myId = socket.id;
+                console.log('📤 Отправляем запрос на создание игры...');
+                socket.emit('create_game');
+                            });
             const btn = document.getElementById('createBtn');
             btn.disabled = true;
             btn.textContent = 'Создание...';
             
             console.log('Creating game...');
-
-            
-
-
-
-
-
             
             // Socket.IO автоматически подключается к тому же домену
             socket = io({
@@ -517,4 +509,5 @@
     </script>
 </body>
 </html>
+
 
