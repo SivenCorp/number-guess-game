@@ -79,6 +79,11 @@
             color: var(--tg-theme-text-color);
         }
         
+        input:focus {
+            outline: none;
+            border-color: var(--tg-theme-button-color);
+        }
+        
         button {
             width: 100%;
             padding: 14px;
@@ -95,6 +100,10 @@
         
         button:hover {
             opacity: 0.9;
+        }
+        
+        button:active {
+            transform: scale(0.98);
         }
         
         button:disabled {
@@ -118,6 +127,8 @@
             font-size: 32px;
             font-weight: bold;
             letter-spacing: 4px;
+            font-family: monospace;
+            user-select: all;
         }
         
         .status {
@@ -127,6 +138,16 @@
             border-radius: 8px;
             margin: 16px 0;
             color: #1976d2;
+        }
+        
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
         }
         
         .result {
@@ -141,11 +162,6 @@
             border: 2px solid #4caf50;
         }
         
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
         .loader {
             border: 3px solid #f3f3f3;
             border-top: 3px solid #3498db;
@@ -156,9 +172,46 @@
             margin: 20px auto;
         }
         
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+        
+        .game-code {
+            font-family: monospace;
+            background: #f5f5f5;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .debug-info {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            padding: 8px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .debug-toggle {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: #666;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            font-size: 12px;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -172,7 +225,7 @@
         <!-- Главное меню -->
         <div id="mainMenu" class="screen active">
             <div class="card">
-                <button onclick="showScreen('createGame')" class="button-primary">
+                <button onclick="createGame()" id="createBtn">
                     🎮 Создать игру
                 </button>
                 <button onclick="showScreen('joinGame')" class="button-secondary">
@@ -188,15 +241,21 @@
                     <li>Побеждает тот, кто ближе к загаданному!</li>
                 </ol>
             </div>
+            <div class="debug-info" id="debugInfo">
+                <div>Socket: <span id="socketStatus">Не подключен</span></div>
+                <div>ID: <span id="socketId">-</span></div>
+                <div>Игра: <span id="currentGame">Нет</span></div>
+            </div>
         </div>
         
         <!-- Создание игры -->
         <div id="createGame" class="screen">
             <div class="card">
-                <button onclick="createGame()" id="createBtn">
+                <button onclick="createGame()" id="createBtn2">
                     Создать комнату
                 </button>
                 <div id="waitingArea" style="display: none;">
+                    <p style="text-align: center;">Код вашей игры:</p>
                     <div class="code-display" id="gameCode"></div>
                     <p style="text-align: center;">Поделитесь этим кодом с другом</p>
                     <button onclick="copyCode()" class="button-secondary">
@@ -217,7 +276,8 @@
         <div id="joinGame" class="screen">
             <div class="card">
                 <div class="input-group">
-                    <input type="text" id="roomCode" placeholder="Введите код игры" maxlength="6">
+                    <input type="text" id="roomCode" placeholder="Введите код игры (6 символов)" 
+                           maxlength="6" oninput="this.value = this.value.toUpperCase()">
                 </div>
                 <button onclick="joinGame()" id="joinBtn">
                     Присоединиться
@@ -232,7 +292,10 @@
         <!-- Игровой экран -->
         <div id="gameScreen" class="screen">
             <div class="card">
-                <div class="status" id="gameStatus"></div>
+                <div class="status" id="gameStatus">
+                    <div class="loader"></div>
+                    <p>Подготовка игры...</p>
+                </div>
                 <div class="input-group">
                     <input type="number" id="guessInput" min="1" max="100" 
                            placeholder="Введите число от 1 до 100">
@@ -240,6 +303,7 @@
                 <button onclick="submitGuess()" id="submitBtn">
                     Отправить число
                 </button>
+                <div class="status" id="guessStatus"></div>
             </div>
         </div>
         
@@ -256,6 +320,8 @@
             </div>
         </div>
     </div>
+
+    <button class="debug-toggle" onclick="toggleDebug()">🔧</button>
 
     <script>
         // Инициализация Telegram WebApp
@@ -275,111 +341,160 @@
         let currentGameId = null;
         let myId = null;
         
+        // Обновление debug информации
+        function updateDebugInfo() {
+            document.getElementById('socketStatus').textContent = 
+                socket?.connected ? 'Подключен' : 'Не подключен';
+            document.getElementById('socketId').textContent = myId || '-';
+            document.getElementById('currentGame').textContent = currentGameId || 'Нет';
+        }
+        
+        // Показать/скрыть debug информацию
+        function toggleDebug() {
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.style.display = debugInfo.style.display === 'block' ? 'none' : 'block';
+        }
+        
         // Показать экран
         function showScreen(screenId) {
+            console.log('🔄 Переход на экран:', screenId);
             document.querySelectorAll('.screen').forEach(screen => {
                 screen.classList.remove('active');
             });
             document.getElementById(screenId).classList.add('active');
+            updateDebugInfo();
         }
         
         // Создать игру
         function createGame() {
-
-             console.log('🔄 Нажата кнопка "Создать игру"');
-    
-             const btn = document.getElementById('createBtn');
-             btn.disabled = true;
-             btn.textContent = 'Создание...';
-             console.log('📡 Подключаемся к WebSocket...');
-    
-             socket = io({
-                 transports: ['websocket', 'polling'],
-                 reconnection: true
-                            });
-    
-            socket.on('connect', () => {
-                console.log('✅ Подключено! ID:', socket.id);
-                myId = socket.id;
-                console.log('📤 Отправляем запрос на создание игры...');
-                socket.emit('create_game');
-                            });
-            const btn = document.getElementById('createBtn');
-            btn.disabled = true;
-            btn.textContent = 'Создание...';
+            console.log('🎮 Нажата кнопка "Создать игру"');
             
-            console.log('Creating game...');
+            const btn = document.getElementById('createBtn') || document.getElementById('createBtn2');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Создание...';
+            }
             
-            // Socket.IO автоматически подключается к тому же домену
-            socket = io({
+            showScreen('createGame');
+            
+            console.log('📡 Подключаемся к WebSocket серверу...');
+            
+            // Подключаемся к WebSocket
+            const serverUrl = window.location.origin;
+            socket = io(serverUrl, {
                 transports: ['websocket', 'polling'],
-                reconnection: true
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
             });
             
             socket.on('connect', () => {
-                console.log('Connected:', socket.id);
+                console.log('✅ Подключение установлено! Socket ID:', socket.id);
                 myId = socket.id;
+                updateDebugInfo();
+                
+                console.log('📤 Отправляем запрос на создание игры...');
                 socket.emit('create_game');
             });
             
             socket.on('game_created', (data) => {
-                console.log('Game created:', data);
+                console.log('🎮 Игра создана:', data);
                 currentGameId = data.gameId;
+                updateDebugInfo();
+                
                 document.getElementById('gameCode').textContent = currentGameId;
                 document.getElementById('waitingArea').style.display = 'block';
-                document.getElementById('createBtn').style.display = 'none';
+                const createBtn = document.getElementById('createBtn2');
+                if (createBtn) createBtn.style.display = 'none';
+                
+                console.log('🆔 Код игры:', currentGameId);
             });
             
             socket.on('waiting', (data) => {
-                console.log('Waiting:', data);
+                console.log('⏳ Ожидание игрока:', data);
                 document.getElementById('waitingStatus').innerHTML = 
                     `<div class="loader"></div><p>${data.message}</p>`;
             });
             
             socket.on('game_start', (data) => {
-                console.log('Game started:', data);
+                console.log('🚀 Игра началась:', data);
                 showScreen('gameScreen');
                 document.getElementById('gameStatus').innerHTML = 
                     `<h3>🎮 Игра началась!</h3><p>${data.message}</p>`;
+                document.getElementById('guessStatus').innerHTML = '';
+            });
+            
+            socket.on('guess_received', (data) => {
+                console.log('✅ Число получено:', data);
+                const remaining = 2 - data.totalGuesses;
+                document.getElementById('guessStatus').innerHTML = 
+                    `<p>Получено чисел: ${data.totalGuesses}/2. Осталось: ${remaining}</p>`;
             });
             
             socket.on('game_result', (data) => {
-                console.log('Game result:', data);
+                console.log('🏆 Результаты игры:', data);
                 showScreen('resultScreen');
                 const isWinner = data.winner === myId;
                 const resultDiv = document.getElementById('resultStatus');
                 
-                resultDiv.innerHTML = `
+                let resultHTML = `
                     <h3>${isWinner ? '🎉 Победа!' : '😢 Поражение'}</h3>
-                    <p style="margin: 10px 0;">Загаданное число: <strong>${data.secretNumber}</strong></p>
-                    ${data.guesses.map(guess => {
-                        const isMe = guess.player === myId;
-                        return `
-                            <div class="result ${guess.player === data.winner ? 'winner' : ''}" 
-                                 style="margin: 10px 0; padding: 12px;">
-                                <p><strong>${isMe ? 'Вы' : 'Соперник'}:</strong> ${guess.guess}</p>
-                                <p>Разница: ${guess.difference}</p>
-                                ${guess.player === data.winner ? '<p>🏆 Ближе к числу!</p>' : ''}
-                            </div>
-                        `;
-                    }).join('')}
+                    <p style="margin: 10px 0; font-size: 18px;">Загаданное число: <strong>${data.secretNumber}</strong></p>
+                    <div style="margin: 20px 0;">
                 `;
                 
-                // Вибрация при победе (если поддерживается)
+                data.guesses.forEach(guess => {
+                    const isMe = guess.player === myId;
+                    const isWinnerGuess = guess.player === data.winner;
+                    resultHTML += `
+                        <div class="result ${isWinnerGuess ? 'winner' : ''}" 
+                             style="margin: 10px 0; padding: 12px;">
+                            <p><strong>${isMe ? 'Вы' : 'Соперник'}:</strong> ${guess.guess}</p>
+                            <p>Разница: ${guess.difference}</p>
+                            ${isWinnerGuess ? '<p>🏆 Ближе к числу!</p>' : ''}
+                        </div>
+                    `;
+                });
+                
+                resultHTML += `</div>`;
+                
+                if (data.isTie) {
+                    resultHTML += `<p style="color: #ff9800; text-align: center;">🤝 Ничья!</p>`;
+                }
+                
+                resultDiv.innerHTML = resultHTML;
+                
+                // Вибрация при победе
                 if (isWinner && tg.isVibrationSupported) {
                     tg.HapticFeedback.impactOccurred('heavy');
                 }
             });
             
             socket.on('error', (data) => {
-                console.error('Error:', data);
+                console.error('❌ Ошибка:', data);
                 alert(`Ошибка: ${data.message}`);
-                btn.disabled = false;
-                btn.textContent = 'Создать комнату';
+                
+                const btn = document.getElementById('createBtn') || document.getElementById('createBtn2');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Создать комнату';
+                }
+                
+                if (document.getElementById('joinStatus')) {
+                    document.getElementById('joinStatus').innerHTML = 
+                        `<div class="status error">${data.message}</div>`;
+                }
             });
             
-            socket.on('disconnect', () => {
-                console.log('Disconnected');
+            socket.on('disconnect', (reason) => {
+                console.log('❌ Отключение от сервера:', reason);
+                updateDebugInfo();
+            });
+            
+            socket.on('connect_error', (error) => {
+                console.error('❌ Ошибка подключения:', error);
+                alert('Не удалось подключиться к серверу');
+                showScreen('mainMenu');
             });
         }
         
@@ -391,67 +506,97 @@
                 return;
             }
             
-            console.log('Joining game:', gameId);
+            console.log('🔗 Присоединение к игре:', gameId);
             
             const btn = document.getElementById('joinBtn');
             btn.disabled = true;
             btn.textContent = 'Присоединение...';
             
-            socket = io({
+            document.getElementById('joinStatus').innerHTML = 
+                '<div class="loader"></div><p>Подключение...</p>';
+            
+            // Подключаемся к WebSocket
+            const serverUrl = window.location.origin;
+            socket = io(serverUrl, {
                 transports: ['websocket', 'polling'],
                 reconnection: true
             });
             
             socket.on('connect', () => {
-                console.log('Connected:', socket.id);
+                console.log('✅ Подключение установлено! Socket ID:', socket.id);
                 myId = socket.id;
-                socket.emit('join_game', gameId);
+                currentGameId = gameId;
+                updateDebugInfo();
+                
+                console.log('📤 Отправляем запрос на присоединение...');
+                socket.emit('join_game', { gameId: gameId });
+            });
+            
+            socket.on('waiting', (data) => {
+                console.log('⏳ Ожидание игрока:', data);
+                document.getElementById('joinStatus').innerHTML = 
+                    `<div class="loader"></div><p>${data.message}</p>`;
             });
             
             socket.on('game_start', (data) => {
-                console.log('Game started:', data);
+                console.log('🚀 Игра началась:', data);
                 showScreen('gameScreen');
                 document.getElementById('gameStatus').innerHTML = 
                     `<h3>🎮 Игра началась!</h3><p>${data.message}</p>`;
+                document.getElementById('guessStatus').innerHTML = '';
             });
             
             socket.on('game_result', (data) => {
-                console.log('Game result:', data);
+                console.log('🏆 Результаты игры:', data);
                 showScreen('resultScreen');
                 const isWinner = data.winner === myId;
                 const resultDiv = document.getElementById('resultStatus');
                 
-                resultDiv.innerHTML = `
+                let resultHTML = `
                     <h3>${isWinner ? '🎉 Победа!' : '😢 Поражение'}</h3>
-                    <p style="margin: 10px 0;">Загаданное число: <strong>${data.secretNumber}</strong></p>
-                    ${data.guesses.map(guess => {
-                        const isMe = guess.player === myId;
-                        return `
-                            <div class="result ${guess.player === data.winner ? 'winner' : ''}" 
-                                 style="margin: 10px 0; padding: 12px;">
-                                <p><strong>${isMe ? 'Вы' : 'Соперник'}:</strong> ${guess.guess}</p>
-                                <p>Разница: ${guess.difference}</p>
-                                ${guess.player === data.winner ? '<p>🏆 Ближе к числу!</p>' : ''}
-                            </div>
-                        `;
-                    }).join('')}
+                    <p style="margin: 10px 0; font-size: 18px;">Загаданное число: <strong>${data.secretNumber}</strong></p>
+                    <div style="margin: 20px 0;">
                 `;
+                
+                data.guesses.forEach(guess => {
+                    const isMe = guess.player === myId;
+                    const isWinnerGuess = guess.player === data.winner;
+                    resultHTML += `
+                        <div class="result ${isWinnerGuess ? 'winner' : ''}" 
+                             style="margin: 10px 0; padding: 12px;">
+                            <p><strong>${isMe ? 'Вы' : 'Соперник'}:</strong> ${guess.guess}</p>
+                            <p>Разница: ${guess.difference}</p>
+                            ${isWinnerGuess ? '<p>🏆 Ближе к числу!</p>' : ''}
+                        </div>
+                    `;
+                });
+                
+                resultHTML += `</div>`;
+                
+                if (data.isTie) {
+                    resultHTML += `<p style="color: #ff9800; text-align: center;">🤝 Ничья!</p>`;
+                }
+                
+                resultDiv.innerHTML = resultHTML;
             });
             
             socket.on('error', (data) => {
-                console.error('Error:', data);
+                console.error('❌ Ошибка:', data);
                 alert(`Ошибка: ${data.message}`);
                 btn.disabled = false;
                 btn.textContent = 'Присоединиться';
+                document.getElementById('joinStatus').innerHTML = 
+                    `<div class="status error">${data.message}</div>`;
             });
         }
         
         // Отправить догадку
         function submitGuess() {
-            const guess = document.getElementById('guessInput').value;
+            const guessInput = document.getElementById('guessInput');
+            const guess = guessInput.value;
             const guessNum = parseInt(guess);
             
-            console.log('Submitting guess:', guess, 'for game:', currentGameId);
+            console.log('🎯 Отправка числа:', guess, 'для игры:', currentGameId);
             
             if (!guess || isNaN(guessNum) || guessNum < 1 || guessNum > 100) {
                 alert('Введите число от 1 до 100');
@@ -459,7 +604,7 @@
             }
             
             if (!socket || !socket.connected) {
-                alert('Нет подключения к серверу');
+                alert('Нет подключения к серверу. Попробуйте перезагрузить страницу.');
                 return;
             }
             
@@ -471,43 +616,57 @@
             const btn = document.getElementById('submitBtn');
             btn.disabled = true;
             btn.textContent = 'Отправлено...';
+            guessInput.disabled = true;
             
             socket.emit('submit_guess', {
                 gameId: currentGameId,
                 guess: guessNum
             });
             
-            document.getElementById('guessInput').disabled = true;
-            
-            document.getElementById('gameStatus').innerHTML = 
-                '<div class="loader"></div><p>Ожидаем второго игрока...</p>';
+            document.getElementById('guessStatus').innerHTML = 
+                '<div class="loader"></div><p>Отправка числа...</p>';
         }
         
         // Скопировать код игры
         function copyCode() {
             const code = document.getElementById('gameCode').textContent;
             navigator.clipboard.writeText(code).then(() => {
-                alert('Код скопирован в буфер!');
+                alert('Код скопирован в буфер обмена!');
+            }).catch(err => {
+                console.error('Ошибка копирования:', err);
+                alert('Не удалось скопировать код');
             });
         }
         
         // Новая игра
         function newGame() {
-            if (socket) socket.disconnect();
+            console.log('🔄 Начало новой игры');
+            if (socket) {
+                socket.disconnect();
+            }
             socket = null;
             currentGameId = null;
+            myId = null;
             showScreen('mainMenu');
+            updateDebugInfo();
         }
         
         // При закрытии приложения
         tg.onEvent('viewportChanged', (event) => {
-            console.log('Viewport changed:', event);
+            console.log('🔄 Изменение viewport:', event);
+        });
+        
+        // Автоматическое подключение при загрузке (для отладки)
+        window.addEventListener('load', () => {
+            console.log('📄 Страница загружена');
+            console.log('URL:', window.location.href);
+            console.log('Telegram WebApp:', tg.initDataUnsafe?.user?.id ? 'Авторизован' : 'Не авторизован');
+            updateDebugInfo();
         });
         
         // Готово
         tg.ready();
+        console.log('✅ Telegram WebApp готов');
     </script>
 </body>
 </html>
-
-
