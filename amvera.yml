@@ -1,0 +1,15 @@
+name: number-guess-game
+runtime: nodejs
+instanceSize: s
+entrypoint: server.js
+autoScaling:
+  min: 1
+  max: 1
+env:
+  - name: NODE_ENV
+    value: production
+  - name: PORT
+    value: "3000"
+build:
+  type: nodejs
+  nodeVersion: "18"

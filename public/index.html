@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Угадай число</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .screen { display: none; }
+        .screen.active { display: block; }
+        input, button {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        #gameCode {
+            font-size: 24px;
+            text-align: center;
+            margin: 20px 0;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="mainMenu" class="screen active">
+        <h1>🎯 Угадай число</h1>
+        <button onclick="showScreen('createGame')">Создать игру</button>
+        <button onclick="showScreen('joinGame')">Присоединиться</button>
+    </div>
+    
+    <div id="createGame" class="screen">
+        <button onclick="createGame()">Создать комнату</button>
+        <div id="waitingArea" style="display:none">
+            <p>Код игры:</p>
+            <div id="gameCode"></div>
+            <p>Ожидаем второго игрока...</p>
+        </div>
+        <button onclick="showScreen('mainMenu')">Назад</button>
+    </div>
+    
+    <div id="joinGame" class="screen">
+        <input type="text" id="roomCode" placeholder="Код игры">
+        <button onclick="joinGame()">Присоединиться</button>
+        <button onclick="showScreen('mainMenu')">Назад</button>
+    </div>
+    
+    <div id="gameScreen" class="screen">
+        <p id="gameStatus">Введите число от 1 до 100</p>
+        <input type="number" id="guessInput" min="1" max="100">
+        <button onclick="submitGuess()">Отправить</button>
+    </div>
+    
+    <div id="resultScreen" class="screen">
+        <div id="resultStatus"></div>
+        <button onclick="showScreen('mainMenu')">Новая игра</button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+        
+        let socket;
+        let currentGameId;
+        
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+        
+        function createGame() {
+            socket = io();
+            socket.on('connect', () => {
+                socket.emit('create_game');
+            });
+            socket.on('game_created', (data) => {
+                currentGameId = data.gameId;
+                document.getElementById('gameCode').textContent = currentGameId;
+                document.getElementById('waitingArea').style.display = 'block';
+            });
+            socket.on('game_start', () => {
+                showScreen('gameScreen');
+            });
+            socket.on('game_result', (data) => {
+                showScreen('resultScreen');
+                document.getElementById('resultStatus').innerHTML = `
+                    <h3>Загаданное число: ${data.secretNumber}</h3>
+                    ${data.guesses.map(g => `
+                        <p>Игрок: ${g.guess} (разница: ${g.difference})</p>
+                    `).join('')}
+                `;
+            });
+        }
+        
+        function joinGame() {
+            const gameId = document.getElementById('roomCode').value;
+            socket = io();
+            socket.on('connect', () => {
+                socket.emit('join_game', gameId);
+            });
+            socket.on('game_start', () => {
+                showScreen('gameScreen');
+            });
+            socket.on('game_result', (data) => {
+                showScreen('resultScreen');
+                document.getElementById('resultStatus').innerHTML = `
+                    <h3>Загаданное число: ${data.secretNumber}</h3>
+                    ${data.guesses.map(g => `
+                        <p>Игрок: ${g.guess} (разница: ${g.difference})</p>
+                    `).join('')}
+                `;
+            });
+        }
+        
+        function submitGuess() {
+            const guess = document.getElementById('guessInput').value;
+            socket.emit('submit_guess', {
+                gameId: currentGameId,
+                guess: guess
+            });
+        }
+    </script>
+</body>
+</html>
