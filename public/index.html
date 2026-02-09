@@ -2,131 +2,491 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Угадай число</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Угадай число | Telegram Mini App</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
+        :root {
+            --tg-theme-bg-color: var(--tg-theme-secondary-bg-color, #f2f2f2);
+            --tg-theme-text-color: var(--tg-theme-text-color, #000000);
+            --tg-theme-button-color: var(--tg-theme-button-color, #2481cc);
+            --tg-theme-button-text-color: var(--tg-theme-button-text-color, #ffffff);
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
-            font-family: Arial, sans-serif;
-            max-width: 400px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+            min-height: 100vh;
+            padding: 16px;
+        }
+        
+        .container {
+            max-width: 500px;
             margin: 0 auto;
-            padding: 20px;
         }
-        .screen { display: none; }
-        .screen.active { display: block; }
-        input, button {
-            width: 100%;
-            padding: 10px;
-            margin: 5px 0;
+        
+        .screen {
+            display: none;
+            animation: fadeIn 0.3s ease;
         }
-        #gameCode {
-            font-size: 24px;
+        
+        .screen.active {
+            display: block;
+        }
+        
+        .header {
             text-align: center;
+            margin-bottom: 24px;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .card {
+            background: var(--tg-theme-secondary-bg-color, #ffffff);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .input-group {
+            margin-bottom: 16px;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            background: var(--tg-theme-bg-color);
+            color: var(--tg-theme-text-color);
+        }
+        
+        button {
+            width: 100%;
+            padding: 14px;
+            background: var(--tg-theme-button-color);
+            color: var(--tg-theme-button-text-color);
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: opacity 0.2s;
+            margin-bottom: 8px;
+        }
+        
+        button:hover {
+            opacity: 0.9;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .button-secondary {
+            background: transparent;
+            color: var(--tg-theme-text-color);
+            border: 1px solid #ddd;
+        }
+        
+        .code-display {
+            text-align: center;
+            padding: 20px;
+            background: var(--tg-theme-button-color);
+            color: white;
+            border-radius: 8px;
             margin: 20px 0;
-            padding: 10px;
-            background: #f0f0f0;
-            border-radius: 5px;
+            font-size: 32px;
+            font-weight: bold;
+            letter-spacing: 4px;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 12px;
+            background: #e3f2fd;
+            border-radius: 8px;
+            margin: 16px 0;
+            color: #1976d2;
+        }
+        
+        .result {
+            margin: 16px 0;
+            padding: 16px;
+            border-radius: 8px;
+            background: #f5f5f5;
+        }
+        
+        .winner {
+            background: #e8f5e9;
+            border: 2px solid #4caf50;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
-    <div id="mainMenu" class="screen active">
-        <h1>🎯 Угадай число</h1>
-        <button onclick="showScreen('createGame')">Создать игру</button>
-        <button onclick="showScreen('joinGame')">Присоединиться</button>
-    </div>
-    
-    <div id="createGame" class="screen">
-        <button onclick="createGame()">Создать комнату</button>
-        <div id="waitingArea" style="display:none">
-            <p>Код игры:</p>
-            <div id="gameCode"></div>
-            <p>Ожидаем второго игрока...</p>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Угадай число</h1>
+            <p>Соревнуйтесь с другом - кто ближе угадает число!</p>
         </div>
-        <button onclick="showScreen('mainMenu')">Назад</button>
-    </div>
-    
-    <div id="joinGame" class="screen">
-        <input type="text" id="roomCode" placeholder="Код игры">
-        <button onclick="joinGame()">Присоединиться</button>
-        <button onclick="showScreen('mainMenu')">Назад</button>
-    </div>
-    
-    <div id="gameScreen" class="screen">
-        <p id="gameStatus">Введите число от 1 до 100</p>
-        <input type="number" id="guessInput" min="1" max="100">
-        <button onclick="submitGuess()">Отправить</button>
-    </div>
-    
-    <div id="resultScreen" class="screen">
-        <div id="resultStatus"></div>
-        <button onclick="showScreen('mainMenu')">Новая игра</button>
+        
+        <!-- Главное меню -->
+        <div id="mainMenu" class="screen active">
+            <div class="card">
+                <button onclick="showScreen('createGame')" class="button-primary">
+                    🎮 Создать игру
+                </button>
+                <button onclick="showScreen('joinGame')" class="button-secondary">
+                    🔗 Присоединиться
+                </button>
+            </div>
+            <div class="card">
+                <h3>Как играть:</h3>
+                <ol style="margin-left: 20px; margin-top: 10px;">
+                    <li>Создайте игру и поделитесь кодом</li>
+                    <li>Друг присоединяется по коду</li>
+                    <li>Загадывайте числа от 1 до 100</li>
+                    <li>Побеждает тот, кто ближе к загаданному!</li>
+                </ol>
+            </div>
+        </div>
+        
+        <!-- Создание игры -->
+        <div id="createGame" class="screen">
+            <div class="card">
+                <button onclick="createGame()" id="createBtn">
+                    Создать комнату
+                </button>
+                <div id="waitingArea" style="display: none;">
+                    <div class="code-display" id="gameCode"></div>
+                    <p style="text-align: center;">Поделитесь этим кодом с другом</p>
+                    <button onclick="copyCode()" class="button-secondary">
+                        📋 Скопировать код
+                    </button>
+                    <div class="status" id="waitingStatus">
+                        <div class="loader"></div>
+                        <p>Ожидаем второго игрока...</p>
+                    </div>
+                </div>
+                <button onclick="showScreen('mainMenu')" class="button-secondary">
+                    ← Назад
+                </button>
+            </div>
+        </div>
+        
+        <!-- Присоединение к игре -->
+        <div id="joinGame" class="screen">
+            <div class="card">
+                <div class="input-group">
+                    <input type="text" id="roomCode" placeholder="Введите код игры" maxlength="6">
+                </div>
+                <button onclick="joinGame()" id="joinBtn">
+                    Присоединиться
+                </button>
+                <div class="status" id="joinStatus"></div>
+                <button onclick="showScreen('mainMenu')" class="button-secondary">
+                    ← Назад
+                </button>
+            </div>
+        </div>
+        
+        <!-- Игровой экран -->
+        <div id="gameScreen" class="screen">
+            <div class="card">
+                <div class="status" id="gameStatus"></div>
+                <div class="input-group">
+                    <input type="number" id="guessInput" min="1" max="100" 
+                           placeholder="Введите число от 1 до 100">
+                </div>
+                <button onclick="submitGuess()" id="submitBtn">
+                    Отправить число
+                </button>
+            </div>
+        </div>
+        
+        <!-- Результаты -->
+        <div id="resultScreen" class="screen">
+            <div class="card">
+                <div id="resultStatus"></div>
+                <button onclick="newGame()" style="margin-top: 20px;">
+                    🎮 Новая игра
+                </button>
+                <button onclick="showScreen('mainMenu')" class="button-secondary">
+                    ← В меню
+                </button>
+            </div>
+        </div>
     </div>
 
     <script>
+        // Инициализация Telegram WebApp
         const tg = window.Telegram.WebApp;
+        
+        // Расширяем на весь экран
         tg.expand();
-        tg.ready();
         
-        let socket;
-        let currentGameId;
+        // Устанавливаем цветовую схему
+        document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#f2f2f2');
+        document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#000000');
+        document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#2481cc');
+        document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
+        document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#ffffff');
         
+        let socket = null;
+        let currentGameId = null;
+        let myId = null;
+        
+        // Показать экран
         function showScreen(screenId) {
-            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.screen').forEach(screen => {
+                screen.classList.remove('active');
+            });
             document.getElementById(screenId).classList.add('active');
         }
         
+        // Создать игру
         function createGame() {
-            socket = io();
+            const btn = document.getElementById('createBtn');
+            btn.disabled = true;
+            btn.textContent = 'Создание...';
+            
+            console.log('Creating game...');
+            
+            // Socket.IO автоматически подключается к тому же домену
+            socket = io({
+                transports: ['websocket', 'polling'],
+                reconnection: true
+            });
+            
             socket.on('connect', () => {
+                console.log('Connected:', socket.id);
+                myId = socket.id;
                 socket.emit('create_game');
             });
+            
             socket.on('game_created', (data) => {
+                console.log('Game created:', data);
                 currentGameId = data.gameId;
                 document.getElementById('gameCode').textContent = currentGameId;
                 document.getElementById('waitingArea').style.display = 'block';
+                document.getElementById('createBtn').style.display = 'none';
             });
-            socket.on('game_start', () => {
+            
+            socket.on('waiting', (data) => {
+                console.log('Waiting:', data);
+                document.getElementById('waitingStatus').innerHTML = 
+                    `<div class="loader"></div><p>${data.message}</p>`;
+            });
+            
+            socket.on('game_start', (data) => {
+                console.log('Game started:', data);
                 showScreen('gameScreen');
+                document.getElementById('gameStatus').innerHTML = 
+                    `<h3>🎮 Игра началась!</h3><p>${data.message}</p>`;
             });
+            
             socket.on('game_result', (data) => {
+                console.log('Game result:', data);
                 showScreen('resultScreen');
-                document.getElementById('resultStatus').innerHTML = `
-                    <h3>Загаданное число: ${data.secretNumber}</h3>
-                    ${data.guesses.map(g => `
-                        <p>Игрок: ${g.guess} (разница: ${g.difference})</p>
-                    `).join('')}
+                const isWinner = data.winner === myId;
+                const resultDiv = document.getElementById('resultStatus');
+                
+                resultDiv.innerHTML = `
+                    <h3>${isWinner ? '🎉 Победа!' : '😢 Поражение'}</h3>
+                    <p style="margin: 10px 0;">Загаданное число: <strong>${data.secretNumber}</strong></p>
+                    ${data.guesses.map(guess => {
+                        const isMe = guess.player === myId;
+                        return `
+                            <div class="result ${guess.player === data.winner ? 'winner' : ''}" 
+                                 style="margin: 10px 0; padding: 12px;">
+                                <p><strong>${isMe ? 'Вы' : 'Соперник'}:</strong> ${guess.guess}</p>
+                                <p>Разница: ${guess.difference}</p>
+                                ${guess.player === data.winner ? '<p>🏆 Ближе к числу!</p>' : ''}
+                            </div>
+                        `;
+                    }).join('')}
                 `;
+                
+                // Вибрация при победе (если поддерживается)
+                if (isWinner && tg.isVibrationSupported) {
+                    tg.HapticFeedback.impactOccurred('heavy');
+                }
+            });
+            
+            socket.on('error', (data) => {
+                console.error('Error:', data);
+                alert(`Ошибка: ${data.message}`);
+                btn.disabled = false;
+                btn.textContent = 'Создать комнату';
+            });
+            
+            socket.on('disconnect', () => {
+                console.log('Disconnected');
             });
         }
         
+        // Присоединиться к игре
         function joinGame() {
-            const gameId = document.getElementById('roomCode').value;
-            socket = io();
+            const gameId = document.getElementById('roomCode').value.trim().toUpperCase();
+            if (!gameId || gameId.length !== 6) {
+                alert('Введите корректный 6-значный код игры');
+                return;
+            }
+            
+            console.log('Joining game:', gameId);
+            
+            const btn = document.getElementById('joinBtn');
+            btn.disabled = true;
+            btn.textContent = 'Присоединение...';
+            
+            socket = io({
+                transports: ['websocket', 'polling'],
+                reconnection: true
+            });
+            
             socket.on('connect', () => {
+                console.log('Connected:', socket.id);
+                myId = socket.id;
                 socket.emit('join_game', gameId);
             });
-            socket.on('game_start', () => {
+            
+            socket.on('game_start', (data) => {
+                console.log('Game started:', data);
                 showScreen('gameScreen');
+                document.getElementById('gameStatus').innerHTML = 
+                    `<h3>🎮 Игра началась!</h3><p>${data.message}</p>`;
             });
+            
             socket.on('game_result', (data) => {
+                console.log('Game result:', data);
                 showScreen('resultScreen');
-                document.getElementById('resultStatus').innerHTML = `
-                    <h3>Загаданное число: ${data.secretNumber}</h3>
-                    ${data.guesses.map(g => `
-                        <p>Игрок: ${g.guess} (разница: ${g.difference})</p>
-                    `).join('')}
+                const isWinner = data.winner === myId;
+                const resultDiv = document.getElementById('resultStatus');
+                
+                resultDiv.innerHTML = `
+                    <h3>${isWinner ? '🎉 Победа!' : '😢 Поражение'}</h3>
+                    <p style="margin: 10px 0;">Загаданное число: <strong>${data.secretNumber}</strong></p>
+                    ${data.guesses.map(guess => {
+                        const isMe = guess.player === myId;
+                        return `
+                            <div class="result ${guess.player === data.winner ? 'winner' : ''}" 
+                                 style="margin: 10px 0; padding: 12px;">
+                                <p><strong>${isMe ? 'Вы' : 'Соперник'}:</strong> ${guess.guess}</p>
+                                <p>Разница: ${guess.difference}</p>
+                                ${guess.player === data.winner ? '<p>🏆 Ближе к числу!</p>' : ''}
+                            </div>
+                        `;
+                    }).join('')}
                 `;
+            });
+            
+            socket.on('error', (data) => {
+                console.error('Error:', data);
+                alert(`Ошибка: ${data.message}`);
+                btn.disabled = false;
+                btn.textContent = 'Присоединиться';
             });
         }
         
+        // Отправить догадку
         function submitGuess() {
             const guess = document.getElementById('guessInput').value;
+            const guessNum = parseInt(guess);
+            
+            console.log('Submitting guess:', guess, 'for game:', currentGameId);
+            
+            if (!guess || isNaN(guessNum) || guessNum < 1 || guessNum > 100) {
+                alert('Введите число от 1 до 100');
+                return;
+            }
+            
+            if (!socket || !socket.connected) {
+                alert('Нет подключения к серверу');
+                return;
+            }
+            
+            if (!currentGameId) {
+                alert('Нет активной игры');
+                return;
+            }
+            
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Отправлено...';
+            
             socket.emit('submit_guess', {
                 gameId: currentGameId,
-                guess: guess
+                guess: guessNum
+            });
+            
+            document.getElementById('guessInput').disabled = true;
+            
+            document.getElementById('gameStatus').innerHTML = 
+                '<div class="loader"></div><p>Ожидаем второго игрока...</p>';
+        }
+        
+        // Скопировать код игры
+        function copyCode() {
+            const code = document.getElementById('gameCode').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                alert('Код скопирован в буфер!');
             });
         }
+        
+        // Новая игра
+        function newGame() {
+            if (socket) socket.disconnect();
+            socket = null;
+            currentGameId = null;
+            showScreen('mainMenu');
+        }
+        
+        // При закрытии приложения
+        tg.onEvent('viewportChanged', (event) => {
+            console.log('Viewport changed:', event);
+        });
+        
+        // Готово
+        tg.ready();
     </script>
 </body>
 </html>
