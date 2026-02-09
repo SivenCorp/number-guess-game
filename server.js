@@ -9,6 +9,10 @@ const io = new Server(server, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
+    },
+    connectionStateRecovery: {
+        maxDisconnectionDuration: 2 * 60 * 1000, // 2 минуты
+        skipMiddlewares: true
     }
 });
 
@@ -22,16 +26,14 @@ app.get('/', (req, res) => {
 // Хранилище игр
 const games = new Map();
 
-// Очистка старых игр каждые 5 минут
+// Логирование состояния
 setInterval(() => {
-    const now = Date.now();
+    console.log(`=== Статус сервера: ${games.size} активных игр ===`);
     for (const [gameId, game] of games.entries()) {
-        if (now - game.createdAt > 30 * 60 * 1000) {
-            games.delete(gameId);
-            console.log('Удалена старая игра:', gameId);
-        }
+        const age = Math.floor((Date.now() - game.createdAt) / 1000);
+        console.log(`Игра ${gameId}: создана ${age} сек назад, игроков: ${game.players.length}`);
     }
-}, 5 * 60 * 1000);
+}, 30 * 1000); // Каждые 30 секунд
 
 // Генерация случайного числа
 function generateNumber() {
@@ -40,56 +42,74 @@ function generateNumber() {
 
 // WebSocket логика
 io.on('connection', (socket) => {
-    console.log('Новое подключение:', socket.id);
+    console.log('✅ Новое подключение:', socket.id);
 
     socket.on('create_game', () => {
+        console.log('🔄 Запрос на создание игры от:', socket.id);
+        
         const gameId = Math.random().toString(36).substring(7);
         const secretNumber = generateNumber();
         
         games.set(gameId, {
             secretNumber,
-            players: [],
+            players: [socket.id], // Сразу добавляем создателя
             guesses: [],
             createdAt: Date.now()
         });
 
-        console.log('Создана игра:', gameId);
+        console.log(`🎮 Создана игра ${gameId}. Игрок: ${socket.id}`);
+        console.log(`📊 Всего игр: ${games.size}`);
+        
         socket.join(gameId);
         socket.emit('game_created', { 
             gameId, 
             message: 'Комната создана. Поделитесь кодом с другом.' 
         });
+        
+        // Отправляем событие waiting создателю
+        socket.emit('waiting', { 
+            message: 'Ожидаем второго игрока...' 
+        });
     });
 
     socket.on('join_game', (gameId) => {
-        console.log('Поиск игры:', gameId);
-        console.log('Доступные игры:', Array.from(games.keys()));
+        console.log(`🔍 Поиск игры ${gameId} для игрока ${socket.id}`);
+        console.log(`📋 Доступные игры: ${Array.from(games.keys()).join(', ') || 'нет'}`);
         
         const game = games.get(gameId);
         if (!game) {
-            console.log('Игра не найдена:', gameId);
+            console.log(`❌ Игра ${gameId} не найдена!`);
             socket.emit('error', { message: 'Игра не найдена' });
             return;
         }
 
+        console.log(`✅ Игра ${gameId} найдена. Игроков: ${game.players.length}`);
+
+        // Проверка времени (игра живет 10 минут)
         const now = Date.now();
-        if (now - game.createdAt > 30 * 60 * 1000) {
+        const gameAge = now - game.createdAt;
+        if (gameAge > 10 * 60 * 1000) {
+            console.log(`⏰ Игра ${gameId} устарела (${Math.floor(gameAge/1000)} сек)`);
             games.delete(gameId);
             socket.emit('error', { message: 'Игра устарела' });
             return;
         }
 
         if (game.players.length >= 2) {
+            console.log(`🚫 Комната ${gameId} заполнена`);
             socket.emit('error', { message: 'Комната заполнена' });
             return;
         }
 
-        socket.join(gameId);
+        // Добавляем второго игрока
         game.players.push(socket.id);
+        socket.join(gameId);
         
-        console.log('Игрок присоединился:', socket.id, 'к игре:', gameId);
-        
+        console.log(`✅ Игрок ${socket.id} присоединился к игре ${gameId}`);
+        console.log(`👥 Теперь игроков: ${game.players.length}`);
+
         if (game.players.length === 2) {
+            console.log(`🎉 Оба игрока в игре ${gameId}! Начинаем!`);
             io.to(gameId).emit('game_start', { 
                 message: 'Оба игрока готовы! Введите числа от 1 до 100' 
             });
@@ -101,8 +121,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('submit_guess', ({ gameId, guess }) => {
+        console.log(`🎯 Получено число ${guess} для игры ${gameId} от ${socket.id}`);
+        
         const game = games.get(gameId);
         if (!game) {
+            console.log(`❌ Игра ${gameId} не найдена при отправке числа`);
             socket.emit('error', { message: 'Игра не найдена' });
             return;
         }
@@ -131,7 +154,7 @@ io.on('connection', (socket) => {
             guess: guessNum
         });
 
-        console.log('Получено число:', guessNum, 'для игры:', gameId);
+        console.log(`✅ Число ${guessNum} сохранено. Всего догадок: ${game.guesses.length}`);
 
         if (game.guesses.length === 2) {
             const secret = game.secretNumber;
@@ -144,11 +167,9 @@ io.on('connection', (socket) => {
             const winner = results[0].difference <= results[1].difference ? 
                 results[0].player : results[1].player;
             
-            console.log('Результаты игры:', gameId, {
-                secretNumber: secret,
-                guesses: results,
-                winner: winner
-            });
+            console.log(`🏆 Игра ${gameId} завершена! Загаданное число: ${secret}`);
+            console.log(`📊 Результаты:`, results);
+            console.log(`🎖️ Победитель: ${winner}`);
             
             io.to(gameId).emit('game_result', {
                 secretNumber: secret,
@@ -158,17 +179,23 @@ io.on('connection', (socket) => {
             });
 
             games.delete(gameId);
-            console.log('Игра завершена и удалена:', gameId);
+            console.log(`🗑️ Игра ${gameId} удалена из памяти`);
         }
     });
 
-    socket.on('disconnect', () => {
-        console.log('Отключение:', socket.id);
+    socket.on('disconnect', (reason) => {
+        console.log(`❌ Отключение: ${socket.id}, причина: ${reason}`);
+    });
+
+    // Обработка ошибок
+    socket.on('error', (error) => {
+        console.error(`⚠️ Ошибка сокета ${socket.id}:`, error);
     });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Сервер запущен на порту ${PORT}`);
-    console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`🚀 Сервер запущен на порту ${PORT}`);
+    console.log(`🌍 NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`⏰ Время запуска: ${new Date().toLocaleString()}`);
 });
